@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logística - Santana & Escoltas</title>
+    <!-- Biblioteca para gerar o PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <style>
+        :root { --primary: #1a2a6c; --secondary: #b21f1f; --success: #27ae60; --dark: #2c3e50; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding-bottom: 50px; color: #333; }
+        
+        /* Cabeçalho */
+        .header { background: linear-gradient(to right, #1a2a6c, #b21f1f); color: white; padding: 20px 15px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        .seletor-mes { width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: none; font-size: 16px; font-weight: bold; }
+
+        /* Menu de Abas */
+        .tabs { display: flex; background: var(--dark); padding: 5px; position: sticky; top: 0; z-index: 100; overflow-x: auto; }
+        .tab-btn { flex: 1; color: white; border: none; background: none; padding: 15px; cursor: pointer; opacity: 0.6; font-size: 11px; font-weight: bold; white-space: nowrap; text-transform: uppercase; }
+        .tab-btn.active { opacity: 1; border-bottom: 3px solid #fff; color: #fff; }
+
+        /* Conteúdo */
+        .container { padding: 15px; max-width: 600px; margin: auto; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        
+        .vigia-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; }
+        .vigia-row.selected { background: #fff5f5; border-left: 5px solid var(--secondary); }
+
+        /* Calendário */
+        .calendario { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 15px; }
+        .dia { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 5px; font-size: 12px; cursor: pointer; font-weight: bold; }
+        .dia.marcado { background: var(--success) !important; color: white; }
+
+        /* Totais */
+        .total-geral-card { background: var(--dark); color: white; padding: 20px; border-radius: 12px; text-align: center; }
+        .btn-pdf { background: #f39c12; color: white; border: none; width: 100%; padding: 15px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; cursor: pointer; }
+        
+        /* Área PDF Oculta */
+        #folha-impressao { display: none; padding: 20px; font-family: Courier, monospace; }
+        .pdf-tabela { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        .pdf-tabela th, .pdf-tabela td { border: 1px solid #000; padding: 6px; text-align: left; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h2 style="margin:0">CONTROLE DE DIÁRIAS</h2>
+    <input type="month" id="mesReferencia" class="seletor-mes" onchange="carregarTudo()">
+</div>
+
+<div class="tabs">
+    <button class="tab-btn active" onclick="mudarBase(1, this)">POSTO FIXO SANTANA</button>
+    <button class="tab-btn" onclick="mudarBase(2, this)">FIXO DOS POSTOS</button>
+    <button class="tab-btn" onclick="mudarBase(3, this)">VIAGENS ESCOLTA</button>
+</div>
+
+<div class="container">
+    <button class="btn-pdf" onclick="gerarPDF()">📄 GERAR RELATÓRIO PDF</button>
+
+    <div class="card">
+        <h4 id="tituloLista" style="color: var(--primary); margin-top: 0;">SETOR: POSTO FIXO SANTANA</h4>
+        <div id="listaVigias"></div>
+        <button onclick="addVigia()" style="width:100%; padding:14px; background:var(--primary); color:white; border:none; border-radius:8px; margin-top:15px; font-weight:bold;">+ ADICIONAR REGISTRO</button>
+    </div>
+
+    <div id="painelControle" class="card" style="display:none">
+        <h4 id="nomeVigiaDestaque" style="margin:0; color:var(--secondary); text-transform: uppercase;"></h4>
+        <p style="font-size:11px; color:#666;">Marque os dias de serviço:</p>
+        <div id="gridCalendario" class="calendario"></div>
+    </div>
+
+    <div class="total-geral-card">
+        <span style="font-size: 10px; opacity: 0.8; letter-spacing: 1px;">FECHAMENTO TOTAL ACUMULADO</span>
+        <div id="resValorGeral" style="font-size: 28px; font-weight: bold; color: #2ecc71; margin-top: 5px;">R$ 0,00</div>
+    </div>
+</div>
+
+<div id="folha-impressao">
+    <div style="text-align:center; border-bottom: 2px solid #000; padding-bottom: 10px;">
+        <h2 style="margin:0">RELATÓRIO DE DIÁRIAS - LOGÍSTICA</h2>
+        <h3 id="pdf-mes" style="margin:5px 0"></h3>
+    </div>
+    <div id="pdf-conteudo"></div>
+    <div id="pdf-total-geral" style="margin-top:20px; font-size:16px; text-align:right; font-weight:bold; border-top: 2px solid #000; padding-top: 10px;"></div>
+</div>
+
+<script>
+    let baseAtual = 1;
+    let vigiaLogado = null;
+    const VALOR_DIARIA = 200;
+
+    const nomesBases = { 
+        1: "POSTO FIXO SANTANA", 
+        2: "FIXO DOS POSTOS", 
+        3: "VIAGENS ESCOLTA" 
+    };
+
+    // Nova chave de banco para evitar conflitos
+    let db = JSON.parse(localStorage.getItem('db_postos_santana')) || {};
+
+    if(!document.getElementById('mesReferencia').value) {
+        const d = new Date();
+        document.getElementById('mesReferencia').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    }
+
+    function carregarTudo() {
+        const mes = document.getElementById('mesReferencia').value;
+        if (!db[mes]) db[mes] = { 1:[], 2:[], 3:[] };
+        vigiaLogado = null;
+        document.getElementById('painelControle').style.display = 'none';
+        renderLista();
+        renderFinanceiro();
+    }
+
+    function salvar() {
+        localStorage.setItem('db_postos_santana', JSON.stringify(db));
+        renderLista();
+        renderFinanceiro();
+    }
+
+    function mudarBase(num, btn) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        baseAtual = num;
+        document.getElementById('tituloLista').innerText = "SETOR: " + nomesBases[num];
+        carregarTudo();
+    }
+
+    function addVigia() {
+        const nome = prompt("Digite o nome completo (será salvo em MAIÚSCULO):");
+        const mes = document.getElementById('mesReferencia').value;
+        if(nome && nome.trim() !== "") {
+            // .toUpperCase() garante que o nome fique em MAIÚSCULO
+            db[mes][baseAtual].push({ nome: nome.trim().toUpperCase(), dias: [] });
+            salvar();
+        }
+    }
+
+    function renderLista() {
+        const mes = document.getElementById('mesReferencia').value;
+        const lista = document.getElementById('listaVigias');
+        lista.innerHTML = "";
+        
+        db[mes][baseAtual].forEach((v, idx) => {
+            const div = document.createElement('div');
+            div.className = `vigia-row ${vigiaLogado === idx ? 'selected' : ''}`;
+            div.innerHTML = `<span onclick="abrirCalendario(${idx})" style="flex:1">
+                                <strong>${v.nome}</strong><br>
+                                <small>${v.dias.length} diárias (R$ ${(v.dias.length * VALOR_DIARIA).toLocaleString('pt-BR')})</small>
+                             </span>
+                             <button onclick="removerVigia(${idx})" style="border:none; background:none; color:var(--secondary); font-size:18px;">🗑</button>`;
+            lista.appendChild(div);
+        });
+    }
+
+    function abrirCalendario(idx) {
+        vigiaLogado = idx;
+        const mes = document.getElementById('mesReferencia').value;
+        const v = db[mes][baseAtual][idx];
+        document.getElementById('nomeVigiaDestaque').innerText = v.nome;
+        document.getElementById('painelControle').style.display = 'block';
+        
+        const grid = document.getElementById('gridCalendario');
+        grid.innerHTML = "";
+        for(let i=1; i<=31; i++) {
+            const diaDiv = document.createElement('div');
+            diaDiv.className = `dia ${v.dias.includes(i) ? 'marcado' : ''}`;
+            diaDiv.innerText = i;
+            diaDiv.onclick = () => {
+                if(v.dias.includes(i)) v.dias = v.dias.filter(d => d !== i);
+                else v.dias.push(i);
+                salvar();
+                abrirCalendario(idx);
+            };
+            grid.appendChild(diaDiv);
+        }
+    }
+
+    function renderFinanceiro() {
+        const mes = document.getElementById('mesReferencia').value;
+        let totalGeral = 0;
+        [1, 2, 3].forEach(b => {
+            if(db[mes][b]) {
+                db[mes][b].forEach(v => { totalGeral += (v.dias.length * VALOR_DIARIA); });
+            }
+        });
+        document.getElementById('resValorGeral').innerText = "R$ " + totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2});
+    }
+
+    function removerVigia(idx) {
+        if(confirm("Deseja apagar este registro permanentemente?")) {
+            const mes = document.getElementById('mesReferencia').value;
+            db[mes][baseAtual].splice(idx, 1);
+            salvar();
+            document.getElementById('painelControle').style.display = 'none';
+        }
+    }
+
+    function gerarPDF() {
+        const mes = document.getElementById('mesReferencia').value;
+        const conteudo = document.getElementById('pdf-conteudo');
+        let html = "";
+        let totalGeral = 0;
+
+        document.getElementById('pdf-mes').innerText = "COMPETÊNCIA: " + mes;
+
+        [1, 2, 3].forEach(b => {
+            let baseData = db[mes][b];
+            if(baseData && baseData.length > 0) {
+                html += `<h4 style="margin-bottom:5px; background:#eee; padding:5px">${nomesBases[b]}</h4>`;
+                html += `<table class="pdf-tabela">
+                            <thead><tr><th>COLABORADOR</th><th>DIAS</th><th>QTD</th><th>SUBTOTAL</th></tr></thead>
+                            <tbody>`;
+                baseData.forEach(v => {
+                    let sub = v.dias.length * VALOR_DIARIA;
+                    totalGeral += sub;
+                    html += `<tr>
+                                <td>${v.nome}</td>
+                                <td style="font-size:9px">${v.dias.sort((a,b)=>a-b).join(', ')}</td>
+                                <td>${v.dias.length}</td>
+                                <td>R$ ${sub.toLocaleString('pt-BR')}</td>
+                             </tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+        });
+        
+        if(html === "") { alert("Não há dados para gerar o relatório."); return; }
+        conteudo.innerHTML = html;
+        document.getElementById('pdf-total-geral').innerHTML = `VALOR TOTAL A PAGAR: R$ ${totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+
+        const element = document.getElementById('folha-impressao');
+        element.style.display = 'block';
+        
+        html2pdf().from(element).set({
+            margin: 10,
+            filename: `RELATORIO_SANTANA_${mes}.pdf`,
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).toPdf().get('pdf').then(function (pdf) {
+            window.open(pdf.output('bloburl'), '_blank');
+            element.style.display = 'none';
+        });
+    }
+
+    carregarTudo();
+</script>
+</body>
+</html>
