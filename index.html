@@ -8,7 +8,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <style>
-        :root { --primary: #1a2a6c; --secondary: #b21f1f; --success: #27ae60; --dark: #2c3e50; }
+        :root { --primary: #1a2a6c; --secondary: #b21f1f; --success: #27ae60; --dark: #2c3e50; --info: #2980b9; }
         body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding-bottom: 50px; color: #333; }
         
         /* Cabeçalho */
@@ -29,8 +29,10 @@
 
         /* Calendário */
         .calendario { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 15px; }
-        .dia { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 5px; font-size: 12px; cursor: pointer; font-weight: bold; }
+        .dia { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #eee; border-radius: 5px; font-size: 12px; cursor: pointer; font-weight: bold; padding: 2px; }
         .dia.marcado { background: var(--success) !important; color: white; }
+        .dia.marcado-valor { background: var(--info) !important; color: white; }
+        .dia span { font-size: 8px; font-weight: normal; margin-top: 2px; }
 
         /* Totais */
         .total-geral-card { background: var(--dark); color: white; padding: 20px; border-radius: 12px; text-align: center; }
@@ -53,6 +55,8 @@
     <button class="tab-btn active" onclick="mudarBase(1, this)">POSTO FIXO SANTANA</button>
     <button class="tab-btn" onclick="mudarBase(2, this)">FIXO DOS POSTOS</button>
     <button class="tab-btn" onclick="mudarBase(3, this)">VIAGENS ESCOLTA</button>
+    <!-- NOVA ABA ADICIONADA -->
+    <button class="tab-btn" onclick="mudarBase(4, this)" style="background: #2980b9;">LOGÍSTICA</button>
 </div>
 
 <div class="container">
@@ -66,7 +70,7 @@
 
     <div id="painelControle" class="card" style="display:none">
         <h4 id="nomeVigiaDestaque" style="margin:0; color:var(--secondary); text-transform: uppercase;"></h4>
-        <p style="font-size:11px; color:#666;">Marque os dias de serviço:</p>
+        <p id="subtituloCalendario" style="font-size:11px; color:#666;">Marque os dias de serviço:</p>
         <div id="gridCalendario" class="calendario"></div>
     </div>
 
@@ -90,13 +94,15 @@
     let vigiaLogado = null;
     const VALOR_DIARIA = 200;
 
+    // Atualizado para conter as 4 opções de bases
     const nomesBases = { 
         1: "POSTO FIXO SANTANA", 
         2: "FIXO DOS POSTOS", 
-        3: "VIAGENS ESCOLTA" 
+        3: "VIAGENS ESCOLTA",
+        4: "LOGÍSTICA"
     };
 
-    // Nova chave de banco para evitar conflitos
+    // Mantida a chave original para preservar os seus dados salvos
     let db = JSON.parse(localStorage.getItem('db_postos_santana')) || {};
 
     if(!document.getElementById('mesReferencia').value) {
@@ -106,7 +112,10 @@
 
     function carregarTudo() {
         const mes = document.getElementById('mesReferencia').value;
-        if (!db[mes]) db[mes] = { 1:[], 2:[], 3:[] };
+        // Inicializa o mês com espaço para as 4 abas
+        if (!db[mes]) db[mes] = { 1:[], 2:[], 3:[], 4:[] };
+        if (!db[mes][4]) db[mes][4] = []; // Proteção caso o mês já existisse sem a aba 4
+        
         vigiaLogado = null;
         document.getElementById('painelControle').style.display = 'none';
         renderLista();
@@ -128,12 +137,22 @@
     }
 
     function addVigia() {
-        const nome = prompt("Digite o nome completo (será salvo em MAIÚSCULO):");
+        const promptTexto = baseAtual === 4 ? "Digite o nome da despesa ou categoria:" : "Digite o nome completo (será salvo em MAIÚSCULO):";
+        const nome = prompt(promptTexto);
         const mes = document.getElementById('mesReferencia').value;
         if(nome && nome.trim() !== "") {
-            // .toUpperCase() garante que o nome fique em MAIÚSCULO
             db[mes][baseAtual].push({ nome: nome.trim().toUpperCase(), dias: [] });
             salvar();
+        }
+    }
+
+    function calcularTotalItem(v) {
+        if (baseAtual === 4) {
+            // Soma os valores manuais da aba Logística
+            return v.dias.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+        } else {
+            // Multiplicação padrão por 200
+            return v.dias.length * VALOR_DIARIA;
         }
     }
 
@@ -143,11 +162,14 @@
         lista.innerHTML = "";
         
         db[mes][baseAtual].forEach((v, idx) => {
+            const totalItem = calcularTotalItem(v);
+            const textoSub = baseAtual === 4 ? `Total Gasto:` : `${v.dias.length} diárias`;
+            
             const div = document.createElement('div');
             div.className = `vigia-row ${vigiaLogado === idx ? 'selected' : ''}`;
             div.innerHTML = `<span onclick="abrirCalendario(${idx})" style="flex:1">
                                 <strong>${v.nome}</strong><br>
-                                <small>${v.dias.length} diárias (R$ ${(v.dias.length * VALOR_DIARIA).toLocaleString('pt-BR')})</small>
+                                <small>${textoSub} (R$ ${totalItem.toLocaleString('pt-BR', {minimumFractionDigits:2})})</small>
                              </span>
                              <button onclick="removerVigia(${idx})" style="border:none; background:none; color:var(--secondary); font-size:18px;">🗑</button>`;
             lista.appendChild(div);
@@ -161,18 +183,51 @@
         document.getElementById('nomeVigiaDestaque').innerText = v.nome;
         document.getElementById('painelControle').style.display = 'block';
         
+        const subtitulo = document.getElementById('subtituloCalendario');
+        subtitulo.innerText = baseAtual === 4 ? "Clique no dia para inserir ou remover o valor gasto:" : "Marque os dias de serviço:";
+
         const grid = document.getElementById('gridCalendario');
         grid.innerHTML = "";
+        
         for(let i=1; i<=31; i++) {
             const diaDiv = document.createElement('div');
-            diaDiv.className = `dia ${v.dias.includes(i) ? 'marcado' : ''}`;
-            diaDiv.innerText = i;
-            diaDiv.onclick = () => {
-                if(v.dias.includes(i)) v.dias = v.dias.filter(d => d !== i);
-                else v.dias.push(i);
-                salvar();
-                abrirCalendario(idx);
-            };
+            diaDiv.className = 'dia';
+            
+            if (baseAtual === 4) {
+                // Lógica para a aba Logística (Mapeamento de Objetos)
+                const registroDia = v.dias.find(d => d.dia === i);
+                if (registroDia) {
+                    diaDiv.classList.add('marcado-valor');
+                    diaDiv.innerHTML = `${i}<span>R$${registroDia.valor}</span>`;
+                } else {
+                    diaDiv.innerText = i;
+                }
+                
+                diaDiv.onclick = () => {
+                    const existenteIdx = v.dias.findIndex(d => d.dia === i);
+                    if (existenteIdx > -1) {
+                        if(confirm(`Deseja remover o valor do dia ${i}?`)) v.dias.splice(existenteIdx, 1);
+                    } else {
+                        const valorGasto = prompt(`Digite o valor gasto no dia ${i}:`);
+                        if(valorGasto && !isNaN(valorGasto.replace(',','.'))) {
+                            v.dias.push({ dia: i, valor: Number(valorGasto.replace(',','.')) });
+                        }
+                    }
+                    salvar();
+                    abrirCalendario(idx);
+                };
+            } else {
+                // Lógica tradicional dos postos fixos (Mapeamento de Números)
+                if(v.dias.includes(i)) diaDiv.classList.add('marcado');
+                diaDiv.innerText = i;
+                
+                diaDiv.onclick = () => {
+                    if(v.dias.includes(i)) v.dias = v.dias.filter(d => d !== i);
+                    else v.dias.push(i);
+                    salvar();
+                    abrirCalendario(idx);
+                };
+            }
             grid.appendChild(diaDiv);
         }
     }
@@ -180,9 +235,16 @@
     function renderFinanceiro() {
         const mes = document.getElementById('mesReferencia').value;
         let totalGeral = 0;
-        [1, 2, 3].forEach(b => {
+        
+        [1, 2, 3, 4].forEach(b => {
             if(db[mes][b]) {
-                db[mes][b].forEach(v => { totalGeral += (v.dias.length * VALOR_DIARIA); });
+                db[mes][b].forEach(v => {
+                    if (b === 4) {
+                        v.dias.forEach(d => { totalGeral += (Number(d.valor) || 0); });
+                    } else {
+                        totalGeral += (v.dias.length * VALOR_DIARIA);
+                    }
+                });
             }
         });
         document.getElementById('resValorGeral').innerText = "R$ " + totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2});
@@ -205,21 +267,31 @@
 
         document.getElementById('pdf-mes').innerText = "COMPETÊNCIA: " + mes;
 
-        [1, 2, 3].forEach(b => {
+        [1, 2, 3, 4].forEach(b => {
             let baseData = db[mes][b];
             if(baseData && baseData.length > 0) {
                 html += `<h4 style="margin-bottom:5px; background:#eee; padding:5px">${nomesBases[b]}</h4>`;
                 html += `<table class="pdf-tabela">
-                            <thead><tr><th>COLABORADOR</th><th>DIAS</th><th>QTD</th><th>SUBTOTAL</th></tr></thead>
+                            <thead><tr><th>COLABORADOR / DESPESA</th><th>DETALHAMENTO</th><th>QTD</th><th>SUBTOTAL</th></tr></thead>
                             <tbody>`;
                 baseData.forEach(v => {
-                    let sub = v.dias.length * VALOR_DIARIA;
+                    let sub = 0;
+                    let detalheTexto = "";
+                    
+                    if (b === 4) {
+                        sub = v.dias.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+                        detalheTexto = v.dias.sort((a,b)=>a.dia-b.dia).map(d => `Dia ${d.dia}: R$ ${d.valor}`).join(' | ');
+                    } else {
+                        sub = v.dias.length * VALOR_DIARIA;
+                        detalheTexto = "Dias: " + v.dias.sort((a,b)=>a-b).join(', ');
+                    }
+                    
                     totalGeral += sub;
                     html += `<tr>
                                 <td>${v.nome}</td>
-                                <td style="font-size:9px">${v.dias.sort((a,b)=>a-b).join(', ')}</td>
+                                <td style="font-size:9px">${detalheTexto || 'Nenhum lançamento'}</td>
                                 <td>${v.dias.length}</td>
-                                <td>R$ ${sub.toLocaleString('pt-BR')}</td>
+                                <td>R$ ${sub.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
                              </tr>`;
                 });
                 html += `</tbody></table>`;
@@ -235,7 +307,7 @@
         
         html2pdf().from(element).set({
             margin: 10,
-            filename: `RELATORIO_SANTANA_${mes}.pdf`,
+            filename: `RELATORIO_SANTANA_GERAL_${mes}.pdf`,
             html2canvas: { scale: 2 },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         }).toPdf().get('pdf').then(function (pdf) {
